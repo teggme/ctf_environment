@@ -1,14 +1,14 @@
 import glob
 import os
 import random
+from contextlib import contextmanager
 
 import imageio
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-from env_static_obstacles import BirdsEyeViewStaticObstacleLocationsEnvironment
 import torch
-from contextlib import contextmanager
+from env_static_obstacles import BirdsEyeViewStaticObstacleLocationsEnvironment
 
 NUMBER_OF_STATIC_OBSTACLES = 1
 NORMAL_BASE_POSITION = (-5, 0)
@@ -20,18 +20,18 @@ class EnvWrapper:
         self.cfg = cfg
 
         self.SUBTASK_ORDER = {
-            'attack': 0,
-            'return': 1,
-        }    
+            "attack": 0,
+            "return": 1,
+        }
         self.SUBTASK_STEPS = {
-            'attack': 100,
-            'return': 100,
+            "attack": 100,
+            "return": 100,
         }
         self.SUBTASK_PREV_SUBTASK = {
-            'return': 'attack',
+            "return": "attack",
         }
         self.SUBTASK_NEXT_SUBTASK = {
-            'attack': 'return',
+            "attack": "return",
         }
         self.START_SUBTASK = "attack"
         self.LAST_SUBTASK = "return"
@@ -62,7 +62,9 @@ class EnvWrapper:
         init_hyrlmp_obs = self.jan_observation[7:11]
 
         self.bev_env = BirdsEyeViewStaticObstacleLocationsEnvironment(
-            INITIAL_STATE=init_normal_obs if self.cfg.subtask == "attack" else init_hyrlmp_obs,
+            INITIAL_STATE=(
+                init_normal_obs if self.cfg.subtask == "attack" else init_hyrlmp_obs
+            ),
             STATIC_OBSTACLE_LOCATIONS=self.cfg.static_obstacle_locations_normal,
             POSITIONAL_SET_POINT=(
                 self.cfg.hyrlmp_base_position
@@ -79,7 +81,7 @@ class EnvWrapper:
         self._elapsed_steps = 0
 
     def get_init_obs(self):
-        
+
         obs = {}
 
         if self.cfg.subtask == "return":
@@ -155,18 +157,18 @@ class EnvWrapper:
                 env_init_normal[3],
             ]
         )
-            
-        obs['observation'] = observation
-        obs['achieved_goal'] = observation[:2] - self.cfg.goal
-        obs['desired_goal'] = self.cfg.goal
+
+        obs["observation"] = observation
+        obs["achieved_goal"] = observation[:2] - self.cfg.goal
+        obs["desired_goal"] = self.cfg.goal
 
         return obs
-    
+
     def step(self, act, curr_obs=None):
 
         ### FLOW function ###
         # obs = prev_obs.copy()
-        obs = curr_obs['observation']
+        obs = curr_obs["observation"]
 
         # normal obs
         obs[0] += act[0]
@@ -178,35 +180,35 @@ class EnvWrapper:
 
         # obs[16] += 1  # timer
         self._elapsed_steps += 1
-        
-        curr_obs['observation'] = obs
-        curr_obs['achieved_goal'] = obs[:2] - curr_obs['desired_goal']
+
+        curr_obs["observation"] = obs
+        curr_obs["achieved_goal"] = obs[:2] - curr_obs["desired_goal"]
 
         info = {}
-        info['gt_goal'] = self.cfg.goal
-        reward = self.compute_reward(curr_obs['observation'][:2], self.cfg.goal)
-        info['is_success'] = reward + 1
-        info['step'] = 1 - reward
+        info["gt_goal"] = self.cfg.goal
+        reward = self.compute_reward(curr_obs["observation"][:2], self.cfg.goal)
+        info["is_success"] = reward + 1
+        info["step"] = 1 - reward
         done = self._elapsed_steps == self.SUBTASK_STEPS[self.subtask]
         reward = done * reward
-        info['subtask'] = self.subtask
-        info['subtask_done'] = False
-        info['subtask_is_success'] = reward 
+        info["subtask"] = self.subtask
+        info["subtask_done"] = False
+        info["subtask_is_success"] = reward
 
         if done:
-            info['subtask_done'] = True
+            info["subtask_done"] = True
             # Transit to next subtask (if current subtask is not terminal) and reset elapsed steps
             if self.subtask in self.SUBTASK_NEXT_SUBTASK.keys():
                 done = False
                 self._elapsed_steps = 0
                 self.subtask = self.SUBTASK_NEXT_SUBTASK[self.subtask]
-                info['is_success'] = False
+                info["is_success"] = False
                 reward = 0
             else:
-                info['is_success'] = reward 
+                info["is_success"] = reward
 
         return curr_obs, reward, done, info
-    
+
     def reset(self, subtask=None):
         self.subtask = self._start_subtask if subtask is None else subtask
 
@@ -214,27 +216,29 @@ class EnvWrapper:
         self._elapsed_steps = 0
 
         return init_obs
-    
+
     def compute_reward(self, loc, goal):
         if len(loc.shape) != 1:
-            metric = np.all(loc==goal, axis=1) 
+            metric = np.all(loc == goal, axis=1)
             return np.where(metric, 1, -1)
         else:
             if (loc == goal).all():
                 return 1
             return -1
-        
+
     def goal_adapator(self, goal, subtask, device=None):
-        '''Make predicted goal compatible with wrapper'''
+        """Make predicted goal compatible with wrapper"""
         if isinstance(goal, np.ndarray):
             return np.append(goal, self.SUBTASK_CONTACT_CONDITION[subtask])
         elif isinstance(goal, torch.Tensor):
             assert device is not None
-            ct_cond = torch.tensor(self.SUBTASK_CONTACT_CONDITION[subtask], dtype=torch.float32)
+            ct_cond = torch.tensor(
+                self.SUBTASK_CONTACT_CONDITION[subtask], dtype=torch.float32
+            )
             ct_cond = ct_cond.repeat(goal.shape[0], 1).to(device)
             adp_goal = torch.cat([goal, ct_cond], 1)
             return adp_goal
-        
+
     def get_reward_functions(self):
         reward_funcs = {}
         for subtask in self.subtask_order.keys():
@@ -244,12 +248,12 @@ class EnvWrapper:
 
     def sample_action(self):
         return self.bev_env.action_space.sample()
-    
+
     @contextmanager
     def switch_subtask(self, subtask=None):
-        '''Temporally switch subtask, default: next subtask'''
+        """Temporally switch subtask, default: next subtask"""
         if subtask is not None:
-            curr_subtask = self.subtask            
+            curr_subtask = self.subtask
             self.subtask = subtask
             yield
             self.subtask = curr_subtask
@@ -275,11 +279,11 @@ class EnvWrapper:
     @property
     def subtask_order(self):
         return self.SUBTASK_ORDER
-    
+
     @property
     def subtask_steps(self):
         return self.SUBTASK_STEPS
-    
+
     @property
     def subtasks(self):
         subtasks = []
@@ -290,12 +294,12 @@ class EnvWrapper:
 
     @property
     def prev_subtasks(self):
-        return self.SUBTASK_PREV_SUBTASK 
-    
+        return self.SUBTASK_PREV_SUBTASK
+
     @property
     def next_subtasks(self):
-        return self.SUBTASK_NEXT_SUBTASK 
-    
+        return self.SUBTASK_NEXT_SUBTASK
+
     @property
     def last_subtask(self):
         return self.LAST_SUBTASK
@@ -304,7 +308,7 @@ class EnvWrapper:
     def len_cond(self):
         return 0
 
-    
+
 def rotate(origin, point, angle):
     """
     Rotate a point counterclockwise by a given angle around a given origin.

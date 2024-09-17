@@ -1,5 +1,6 @@
-import numpy as np
+import os
 
+import numpy as np
 from config import Config
 from env_utils import EnvWrapper
 
@@ -8,6 +9,7 @@ from env_utils import EnvWrapper
 # "attack" or "return"
 subtask = "attack"
 cfg = Config(subtask=subtask)
+os.makedirs(f"{cfg.base_path}/agents", exist_ok=True)
 
 env = EnvWrapper(cfg)
 init_obs = env.reset()
